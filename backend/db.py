@@ -11,7 +11,9 @@ connect_args = (
     {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
 )
 
-engine = create_engine(settings.database_url, echo=True, connect_args=connect_args)
+engine = create_engine(
+    settings.database_url, echo=settings.sql_echo, connect_args=connect_args
+)
 
 
 def get_session() -> Generator[Session, None, None]:

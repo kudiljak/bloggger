@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     cookie_secure: bool = False
     cookie_samesite: str = "lax"
 
+    log_level: str = "INFO"
+    sql_echo: bool = False
+
+    anthropic_api_key: str = ""
+    llm_model: str = "claude-sonnet-4-6"
+    max_revisions: int = 3
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
