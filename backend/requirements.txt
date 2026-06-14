@@ -1,0 +1,14 @@
+# --- Web framework & server ---
+fastapi              # web framework (routes, dependency injection, validation)
+uvicorn[standard]    # ASGI server that runs the FastAPI app (uvicorn main:app)
+
+# --- Database / ORM ---
+sqlmodel             # ORM = SQLAlchemy + Pydantic combined; models are tables AND schemas
+
+# --- Configuration ---
+pydantic-settings    # loads settings from .env / environment into a typed Settings object
+
+# --- Auth ---
+pyjwt                # JWT encode/decode (replaces python-jose; pure Python, maintained)
+bcrypt               # password hashing (replaces passlib; called directly)
+python-multipart     # OAuth2PasswordRequestForm reads form-data; login breaks without it
