@@ -1,0 +1,61 @@
+substitutions:
+  _REGION: europe-west1
+  _REPO: europe-west1-docker.pkg.dev/${PROJECT_ID}/blogger
+
+steps:
+  - id: build-backend
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REPO}/blogger-api:$SHORT_SHA
+      - -t
+      - ${_REPO}/blogger-api:latest
+      - backend
+  - id: push-backend
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, '${_REPO}/blogger-api']
+  - id: deploy-backend
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - blogger-api
+      - --image
+      - ${_REPO}/blogger-api:$SHORT_SHA
+      - --region
+      - ${_REGION}
+
+  - id: build-frontend
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REPO}/blogger-web:$SHORT_SHA
+      - -t
+      - ${_REPO}/blogger-web:latest
+      - frontend
+  - id: push-frontend
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, '${_REPO}/blogger-web']
+  - id: deploy-frontend
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - blogger-web
+      - --image
+      - ${_REPO}/blogger-web:$SHORT_SHA
+      - --region
+      - ${_REGION}
+
+images:
+  - ${_REPO}/blogger-api:$SHORT_SHA
+  - ${_REPO}/blogger-api:latest
+  - ${_REPO}/blogger-web:$SHORT_SHA
+  - ${_REPO}/blogger-web:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY
