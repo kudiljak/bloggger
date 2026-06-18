@@ -28,6 +28,7 @@ def make_critique(approved: bool) -> Critique:
         grammar=ok,
         accuracy=ok,
         tone_brand_audience=tone,
+        length=ok,
     )
 
 
@@ -35,10 +36,12 @@ class FakeWriter:
     def __init__(self):
         self.calls = 0
         self.feedbacks: list[str | None] = []
+        self.prev_drafts: list[str | None] = []
 
     async def __call__(self, brief, previous_draft, previous_feedback):
         self.calls += 1
         self.feedbacks.append(previous_feedback)
+        self.prev_drafts.append(previous_draft)
         return f"draft v{self.calls}"
 
 
@@ -96,11 +99,36 @@ async def test_checkpointer_persists_state():
     print("PASS checkpointer_persists_state: state retrievable by thread_id")
 
 
+async def test_refine_resumes_from_checkpoint():
+    saver = MemorySaver()
+    writer, crit = FakeWriter(), FakeCritic(approve_on=1)
+    graph = build_graph(advocate_fn=writer, critic_fn=crit, checkpointer=saver)
+    config = {"configurable": {"thread_id": "conv-1"}}
+
+    await graph.ainvoke(
+        {"brief": BRIEF.model_dump(), "draft": "", "critique": None, "iterations": 0},
+        config=config,
+    )
+    # Refine: resume the same thread with ONLY an instruction (no brief, no draft).
+    final = await graph.ainvoke(
+        {"critique": {"approved": False, "feedback": "Make it funnier"}, "iterations": 0},
+        config=config,
+    )
+
+    # The second advocate call must have seen the persisted draft + the instruction,
+    # proving brief/draft survived in the checkpoint without being re-sent.
+    assert writer.prev_drafts == [None, "draft v1"]
+    assert writer.feedbacks == [None, "Make it funnier"]
+    assert final["draft"] == "draft v2"
+    print("PASS refine_resumes_from_checkpoint: refine sees persisted draft via thread_id")
+
+
 async def main():
     await test_approve_first_pass()
     await test_revise_then_approve()
     await test_guard_at_three()
     await test_checkpointer_persists_state()
+    await test_refine_resumes_from_checkpoint()
     print("\nALL GRAPH TESTS PASSED (async, no API calls)")
 
 

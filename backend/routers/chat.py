@@ -1,16 +1,27 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from langgraph.checkpoint.memory import MemorySaver
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 
-from db import get_session
+from db import engine, get_session
 from deps import get_current_user
-from graph import run
+from graph import refine_stream, run, run_stream
 from llm import Brief
 from models import Conversation, Message, User
-from schemas import BriefIn, ConversationCreate, ConversationRead, MessageRead
+from schemas import (
+    BriefIn,
+    ConversationCreate,
+    ConversationRead,
+    MessageRead,
+    RefineIn,
+)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
-checkpointer = MemorySaver()
+
+
+def get_checkpointer(request: Request):
+    return request.app.state.checkpointer
 
 
 def _render_brief(brief: Brief) -> str:
@@ -29,6 +40,31 @@ def _get_owned_conversation(
             status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
         )
     return conversation
+
+
+def _persist_exchange(conversation_id: int, user_content: str, result: dict) -> dict:
+    with Session(engine) as session:
+        user_message = Message(
+            conversation_id=conversation_id, role="user", content=user_content
+        )
+        assistant_message = Message(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=result["draft"],
+            critique=result["critique"],
+            iterations=result["iterations"],
+        )
+        session.add(user_message)
+        session.add(assistant_message)
+        session.commit()
+        session.refresh(user_message)
+        session.refresh(assistant_message)
+        return {
+            "type": "done",
+            "user_message_id": user_message.id,
+            "assistant_message_id": assistant_message.id,
+            "iterations": result["iterations"],
+        }
 
 
 @router.post(
@@ -86,6 +122,7 @@ async def send_message(
     brief_in: BriefIn,
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
+    checkpointer=Depends(get_checkpointer),
 ) -> list[Message]:
     _get_owned_conversation(conversation_id, current_user, session)
 
@@ -112,3 +149,88 @@ async def send_message(
     session.refresh(user_message)
     session.refresh(assistant_message)
     return [user_message, assistant_message]
+
+
+@router.post("/conversations/{conversation_id}/stream")
+async def stream_message(
+    conversation_id: int,
+    brief_in: BriefIn,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    checkpointer=Depends(get_checkpointer),
+) -> StreamingResponse:
+    conversation = _get_owned_conversation(conversation_id, current_user, session)
+    brief = Brief(**brief_in.model_dump())
+    conversation.brief = brief.model_dump()
+    session.add(conversation)
+    session.commit()
+
+    async def event_generator():
+        result = None
+        async for event in run_stream(
+            brief,
+            thread_id=f"conv-{conversation_id}",
+            checkpointer=checkpointer,
+        ):
+            if event["type"] == "result":
+                result = event
+                continue
+            yield f"data: {json.dumps(event)}\n\n"
+
+        done = _persist_exchange(conversation_id, _render_brief(brief), result)
+        yield f"data: {json.dumps(done)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/conversations/{conversation_id}/refine")
+async def refine_message(
+    conversation_id: int,
+    refine_in: RefineIn,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    checkpointer=Depends(get_checkpointer),
+) -> StreamingResponse:
+    conversation = _get_owned_conversation(conversation_id, current_user, session)
+
+    last_post = session.exec(
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .where(Message.role == "assistant")
+        .order_by(Message.created_at.desc())
+    ).first()
+    if last_post is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Nothing to refine yet"
+        )
+
+    instruction = refine_in.instruction
+    fallback_brief = conversation.brief
+    fallback_post = last_post.content
+
+    async def event_generator():
+        result = None
+        async for event in refine_stream(
+            instruction,
+            thread_id=f"conv-{conversation_id}",
+            checkpointer=checkpointer,
+            fallback_brief=fallback_brief,
+            fallback_post=fallback_post,
+        ):
+            if event["type"] == "result":
+                result = event
+                continue
+            yield f"data: {json.dumps(event)}\n\n"
+
+        done = _persist_exchange(conversation_id, f"Refine: {instruction}", result)
+        yield f"data: {json.dumps(done)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

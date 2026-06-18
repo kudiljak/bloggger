@@ -25,6 +25,7 @@ class ConversationCreate(SQLModel):
 class ConversationRead(SQLModel):
     id: int
     title: str
+    brief: dict | None
     created_at: datetime
 
 
@@ -34,6 +35,10 @@ class BriefIn(SQLModel):
     tone: str
     audience: str
     length: str
+
+
+class RefineIn(SQLModel):
+    instruction: str
 
 
 class MessageRead(SQLModel):

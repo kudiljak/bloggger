@@ -5,13 +5,15 @@ uvicorn[standard]    # ASGI server that runs the FastAPI app (uvicorn main:app)
 # --- Database / ORM ---
 sqlmodel             # ORM = SQLAlchemy + Pydantic combined; models are tables AND schemas
 alembic              # database migrations (versioned schema changes)
+psycopg[binary]      # PostgreSQL driver for production (Cloud SQL); only DATABASE_URL changes
 
 # --- Configuration ---
 pydantic-settings    # loads settings from .env / environment into a typed Settings object
 
 # --- LLM / agents ---
-anthropic            # official Anthropic SDK (Claude API calls)
-langgraph            # build the writer->critic agent graph (state machine for LLM steps)
+anthropic                    # official Anthropic SDK (Claude API calls)
+langgraph                    # build the writer->critic agent graph (state machine for LLM steps)
+langgraph-checkpoint-redis   # Redis checkpointer for production (graph state persists across requests)
 
 # --- Auth ---
 pyjwt                # JWT encode/decode (replaces python-jose; pure Python, maintained)

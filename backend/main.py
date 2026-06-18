@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from langgraph.checkpoint.memory import MemorySaver
 
 from config import get_settings
 from logging_config import log, setup_logging
@@ -16,7 +17,18 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("Starting up")
-    yield
+    if settings.redis_url:
+        from langgraph.checkpoint.redis.aio import AsyncRedisSaver
+
+        async with AsyncRedisSaver.from_conn_string(settings.redis_url) as saver:
+            await saver.asetup()
+            app.state.checkpointer = saver
+            log.info("Checkpointer: Redis")
+            yield
+    else:
+        app.state.checkpointer = MemorySaver()
+        log.info("Checkpointer: in-memory (MemorySaver)")
+        yield
     log.info("Shutting down")
 
 
